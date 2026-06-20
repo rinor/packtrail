@@ -1,0 +1,59 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package runtime
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/henomis/packtrail/internal/dsl"
+	"github.com/henomis/packtrail/internal/store"
+)
+
+// stepChoice evaluates a choice node's rules in order against the shared payload
+// and advances to the first matching rule's target, or the default. A rule whose
+// expression errors (e.g. a missing field) is treated as no-match so the default
+// still applies.
+func (e *Engine) stepChoice(ctx context.Context, _ *dsl.Flow, node *dsl.Node, exec *store.Execution) error {
+	defaultTo := ""
+
+	for _, r := range node.Rules {
+		if r.Default {
+			defaultTo = r.To
+			continue
+		}
+
+		prog, ok := e.programs[r.When]
+		if !ok {
+			return fmt.Errorf("choice %q: expression not compiled: %q", node.ID, r.When)
+		}
+
+		match, err := prog.Match(exec.Payload)
+		if err != nil {
+			e.log.Warn("choice rule eval", "node", node.ID, "when", r.When, "err", err)
+			continue
+		}
+
+		if match {
+			return e.advanceTo(ctx, exec.ID, r.To, nil)
+		}
+	}
+
+	if defaultTo == "" {
+		return fmt.Errorf("choice %q: no rule matched and no default", node.ID)
+	}
+
+	return e.advanceTo(ctx, exec.ID, defaultTo, nil)
+}

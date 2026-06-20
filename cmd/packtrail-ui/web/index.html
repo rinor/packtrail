@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>packtrail · observability</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>packtrail</h1>
+    <span class="sub">observability</span>
+    <span id="conn" class="conn" title="live event stream">●</span>
+  </header>
+
+  <main>
+    <aside id="sidebar">
+      <div class="filters">
+        <select id="flow-filter"><option value="">all flows</option></select>
+        <select id="status-filter">
+          <option value="">all statuses</option>
+          <option value="running">running</option>
+          <option value="waiting">waiting</option>
+          <option value="completed">completed</option>
+          <option value="failed">failed</option>
+        </select>
+      </div>
+      <ul id="exec-list"></ul>
+    </aside>
+
+    <section id="detail">
+      <p class="empty">Select an execution.</p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

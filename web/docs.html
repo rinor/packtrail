@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Packtrail — Documentation</title>
+<meta name="description" content="Full documentation for Packtrail, a durable, ecosystem-agnostic workflow engine on NATS: installation, the flow DSL, the pluggable Invoker, async activities, signals, scheduling, the Server API and configuration reference." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+<noscript><style>.reveal{opacity:1!important;transform:none!important}</style></noscript>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M6 26 Q16 14 26 6' stroke='%2338bdf8' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='6' cy='26' r='4.5' fill='%2338bdf8'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%2338bdf8' opacity='.75'/%3E%3Ccircle cx='26' cy='6' r='4.5' fill='%2338bdf8'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- ============================ NAV ============================ -->
+<header class="nav" id="top">
+  <div class="nav__inner">
+    <a class="brand" href="index.html" aria-label="Packtrail home">
+      <svg class="brand__mark" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M8 34 Q20 20, 32 7" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+        <circle cx="8" cy="34" r="5.5" fill="currentColor"/>
+        <circle cx="20" cy="20.5" r="3.8" fill="currentColor" opacity="0.7"/>
+        <circle cx="32" cy="7" r="5.5" fill="currentColor"/>
+      </svg>
+      <span>Packtrail</span>
+    </a>
+    <nav class="nav__links">
+      <a href="index.html#architecture">Architecture</a>
+      <a href="index.html#invoker">Invoker</a>
+      <a href="index.html#dsl">Flows</a>
+      <a href="index.html#ui">packtrail-ui</a>
+      <a class="docs__nav-link" href="docs.html">Docs</a>
+      <a class="nav__gh" href="https://github.com/henomis/packtrail" target="_blank" rel="noopener">GitHub ↗</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ============================ DOCS PAGE HEAD ============================ -->
+<section class="section" style="padding-bottom:1.5rem">
+  <div class="section__head" style="margin-bottom:0">
+    <span class="eyebrow">Documentation</span>
+    <h2>The full Packtrail reference.</h2>
+    <p class="docs__lead">
+      Everything needed to embed the engine, declare flows, plug in your transport, and operate a
+      deployment. Packtrail is a durable, NATS-only workflow engine: every state transition is a
+      compare-and-swap write to JetStream KV, so a crashed instance loses no progress.
+    </p>
+  </div>
+</section>
+
+<div class="docs">
+  <!-- ---------- SIDEBAR ---------- -->
+  <aside class="docs__nav">
+    <h4>Getting started</h4>
+    <a href="#install">Installation</a>
+    <a href="#quickstart">Quick start</a>
+    <a href="#concepts">Core concepts</a>
+
+    <h4>Flow definitions</h4>
+    <a href="#flow-anatomy">Anatomy of a flow</a>
+    <a href="#node-task">task</a>
+    <a href="#node-fanout">fanout</a>
+    <a href="#node-fanin">fanin</a>
+    <a href="#node-choice">choice</a>
+    <a href="#node-signal">signal</a>
+    <a href="#edges">Edges &amp; start node</a>
+
+    <h4>Execution</h4>
+    <a href="#invoker">The Invoker</a>
+    <a href="#nats-task">Built-in nats-task</a>
+    <a href="#async">Async activities</a>
+    <a href="#signals">Signals</a>
+    <a href="#scheduling">Scheduling &amp; cron</a>
+    <a href="#statuses">Statuses &amp; lifecycle</a>
+
+    <h4>Reference</h4>
+    <a href="#server-api">Server API</a>
+    <a href="#options">Configuration options</a>
+    <a href="#resources">NATS resources</a>
+    <a href="#observability">Observability</a>
+    <a href="#testing">Testing</a>
+  </aside>
+
+  <!-- ---------- BODY ---------- -->
+  <article class="docs__body">
+
+    <!-- INSTALL -->
+    <section id="install">
+      <span class="eyebrow">Getting started</span>
+      <h2>Installation</h2>
+      <p>
+        Packtrail is a Go module. Add it to your project and import the root <code>packtrail</code> package —
+        the single public entry point. It requires Go 1.25+ and a reachable NATS server with
+        JetStream and the Message Scheduler enabled.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">shell</span>
+          <button class="copy" data-copy="#i-get">Copy</button>
+        </div>
+<pre class="codecard__body" id="i-get"><code><span class="pr">$</span> go get github.com/henomis/packtrail
+
+<span class="cm"># run a NATS server with JetStream for local development</span>
+<span class="pr">$</span> nats-server -js</code></pre>
+      </div>
+      <p>
+        The <code>Server</code> never owns the <code>*nats.Conn</code> you give it — your code connects
+        and closes the connection.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- QUICKSTART -->
+    <section id="quickstart">
+      <span class="eyebrow">Getting started</span>
+      <h2>Quick start</h2>
+      <p>
+        Build a <code>Server</code> against a NATS connection, register a flow and an Invoker, start an
+        execution, then call <code>Run</code> to drive the engine. A single binary can host the engine
+        and its workers.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">main.go</span>
+          <button class="copy" data-copy="#qs-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="qs-src"><code>nc, _ := nats.<span class="fn">Connect</span>(nats.DefaultURL)
+<span class="kw">defer</span> nc.<span class="fn">Close</span>()
+
+srv, err := packtrail.<span class="fn">New</span>(nc,
+    packtrail.<span class="fn">WithFlowsDir</span>(<span class="s">"flows"</span>),         <span class="cm">// load *.yaml flows from disk</span>
+    packtrail.<span class="fn">WithInvoker</span>(<span class="s">"agent"</span>, myInvoker), <span class="cm">// your transport</span>
+)
+<span class="kw">if</span> err != <span class="kw">nil</span> { log.<span class="fn">Fatal</span>(err) }
+
+<span class="cm">// Kick off an execution with an initial JSON payload.</span>
+id, _ := srv.<span class="fn">Start</span>(ctx, <span class="s">"research-pipeline"</span>,
+    []<span class="kw">byte</span>(<span class="s">`{"topic":"nats"}`</span>))
+log.<span class="fn">Printf</span>(<span class="s">"started %s"</span>, id)
+
+<span class="cm">// Run blocks: it drives the work consumer + visibility indexer</span>
+<span class="cm">// until ctx is cancelled. Registered workers drain on return.</span>
+<span class="kw">if</span> err := srv.<span class="fn">Run</span>(ctx); err != <span class="kw">nil</span> {
+    log.<span class="fn">Fatal</span>(err)
+}</code></pre>
+      </div>
+      <div class="callout">
+        <strong>No processing happens until <code>Run</code> is called.</strong> <code>New</code> bootstraps
+        every bucket and stream, registers invokers and publishes flow graphs — but the engine only
+        starts consuming work inside <code>Run</code>.
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- CONCEPTS -->
+    <section id="concepts">
+      <span class="eyebrow">Getting started</span>
+      <h2>Core concepts</h2>
+      <p>Four invariants explain everything else in this reference.</p>
+
+      <h3>State on disk, never only in memory</h3>
+      <p>
+        Every execution's state lives in the <code>packtrail-executions</code> KV bucket. Each transition is
+        a compare-and-swap write conditioned on the current KV revision. Crash an engine mid-flight and
+        another instance resumes from the durable state — there is nothing in memory to lose.
+      </p>
+
+      <h3>One backend: NATS</h3>
+      <p>
+        JetStream KV holds execution state, streams provide the durable work queue and event log, and
+        the Message Scheduler runs every timer (retry backoff, signal timeouts, cron starts). There is
+        no second datastore to run, scale or back up.
+      </p>
+
+      <h3>Ownership leases, not locks</h3>
+      <p>
+        A durable pull consumer distributes work across all engine instances; a per-execution lease
+        (TTL, see <a href="#options"><code>WithLeaseTTL</code></a>) keeps a single writer at a time. A
+        crashed instance's lease simply expires and another instance acquires it on the next
+        redelivery — no coordinator, no lock to leak.
+      </p>
+
+      <h3>The Invoker is the only seam</h3>
+      <p>
+        The engine never speaks a wire protocol itself. Every <code>task</code> node and fan-out branch
+        runs through an <a href="#invoker"><code>Invoker</code></a>. Plug in any transport — an agent
+        caller, an HTTP client, the built-in NATS worker — and inherit retries, fan-in policies,
+        choice routing, signals and timers for free.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- FLOW ANATOMY -->
+    <section id="flow-anatomy">
+      <span class="eyebrow">Flow definitions</span>
+      <h2>Anatomy of a flow</h2>
+      <p>
+        A flow is a YAML document describing a graph of <strong>nodes</strong> connected by
+        <strong>edges</strong>. Packtrail parses and validates it at startup, then walks the graph at
+        runtime. Top-level fields:
+      </p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>version</td><td>Schema version string, e.g. <code>"1.0"</code>.</td></tr>
+          <tr><td>name</td><td>Unique flow name; used by <code>Start</code> and the flow registry. Required.</td></tr>
+          <tr><td>nodes</td><td>List of nodes. Each has an <code>id</code> and a <code>type</code> (<code>task</code>, <code>fanout</code>, <code>fanin</code>, <code>choice</code> or <code>signal</code>). Required, non-empty.</td></tr>
+          <tr><td>edges</td><td>List of <code>{from, to}</code> static transitions. A node may have at most one outgoing edge.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Flows are loaded with <a href="#options"><code>WithFlowsDir</code></a> (every <code>*.yaml</code>
+        / <code>*.yml</code> in a directory) or <code>WithFlow</code> (one inline document, repeatable).
+        Duplicate flow names are rejected.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">flows/research-pipeline.yaml</span>
+          <button class="copy" data-copy="#flow-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="flow-src"><code><span class="k">version</span>: <span class="s">"1.0"</span>
+<span class="k">name</span>: research-pipeline
+<span class="k">nodes</span>:
+  - {<span class="k">id</span>: triage, <span class="k">type</span>: <span class="t">task</span>, <span class="k">invoker</span>: agent, <span class="k">target</span>: triage-agent,
+     <span class="k">timeout</span>: 2m, <span class="k">retry</span>: {<span class="k">max_attempts</span>: 3, <span class="k">backoff</span>: exponential}}
+  - {<span class="k">id</span>: fan,  <span class="k">type</span>: <span class="t">fanout</span>, <span class="k">branches</span>: [tech, market]}
+  - {<span class="k">id</span>: tech,   <span class="k">type</span>: <span class="t">task</span>, <span class="k">invoker</span>: agent, <span class="k">target</span>: tech-agent}
+  - {<span class="k">id</span>: market, <span class="k">type</span>: <span class="t">task</span>, <span class="k">invoker</span>: agent, <span class="k">target</span>: market-agent}
+  - {<span class="k">id</span>: join, <span class="k">type</span>: <span class="t">fanin</span>, <span class="k">wait_for</span>: [tech, market], <span class="k">join_policy</span>: all}
+<span class="k">edges</span>:
+  - {<span class="k">from</span>: triage, <span class="k">to</span>: fan}
+  - {<span class="k">from</span>: fan,    <span class="k">to</span>: join}</code></pre>
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- TASK -->
+    <section id="node-task">
+      <span class="eyebrow">Flow definitions · node types</span>
+      <h2><span class="dot dot--task"></span> task</h2>
+      <p>
+        A <code>task</code> node dispatches a single invocation through the configured Invoker. It is the
+        only node type that calls out to your code.
+      </p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>invoker</td><td>Invoker kind to dispatch through. Defaults to <code>nats-task</code> when omitted.</td></tr>
+          <tr><td>target</td><td>Invoker-specific target — an agent name, a URL, a subject. Takes precedence over <code>subject</code>.</td></tr>
+          <tr><td>subject</td><td>Alias for <code>target</code>, kept for nats-task flows. <strong>One of <code>target</code> / <code>subject</code> is required.</strong></td></tr>
+          <tr><td>timeout</td><td>Per-attempt deadline, e.g. <code>2m</code>, <code>30s</code>. Falls back to <a href="#options"><code>WithDefaultTimeout</code></a> (30s).</td></tr>
+          <tr><td>retry</td><td>Optional <code>{max_attempts, backoff}</code> policy — see below.</td></tr>
+        </tbody>
+      </table>
+      <h4>Retry policy</h4>
+      <p>
+        <code>retry.max_attempts</code> must be <code>&gt;= 0</code>. <code>retry.backoff</code> is one of
+        <code>exponential</code>, <code>linear</code>, or <code>fixed</code> (the default when omitted).
+        Backoff delays are scheduled durably through the NATS Message Scheduler, so a waiting retry holds
+        no engine resources and survives restarts. A node is retried when its Invoker returns
+        <code>StatusRetry</code> or a non-nil error; <code>StatusError</code> fails it permanently.
+      </p>
+      <h4>Placeholders</h4>
+      <p>
+        The token <code>{execution_id}</code> in a <code>target</code> / <code>subject</code> is replaced
+        with the concrete execution id before invocation — e.g.
+        <code>subject: "tasks.notify.{execution_id}"</code>.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- FANOUT -->
+    <section id="node-fanout">
+      <span class="eyebrow">Flow definitions · node types</span>
+      <h2><span class="dot dot--fan"></span> fanout</h2>
+      <p>
+        A <code>fanout</code> node starts several branches in parallel. Each branch id must reference
+        another node in the flow; those branch nodes run concurrently, each through the Invoker, and
+        their results are persisted in KV so they are never recomputed on engine takeover.
+      </p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>branches</td><td>List of node ids to launch in parallel. Required, non-empty.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        Branch nodes are reached only via the fan-out, so they do not count as start nodes and do not
+        need an inbound edge. A branch may itself return <code>StatusPending</code> to run asynchronously.
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- FANIN -->
+    <section id="node-fanin">
+      <span class="eyebrow">Flow definitions · node types</span>
+      <h2><span class="dot dot--fan"></span> fanin</h2>
+      <p>A <code>fanin</code> node joins parallel branches and proceeds according to its join policy.</p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>wait_for</td><td>List of branch node ids to join on. Required, non-empty.</td></tr>
+          <tr><td>join_policy</td><td>How many branches must finish — see below. Defaults to <code>all</code>.</td></tr>
+        </tbody>
+      </table>
+      <h4>Join policies</h4>
+      <ul>
+        <li><code>all</code> — wait for every branch in <code>wait_for</code> (the default).</li>
+        <li><code>any</code> — proceed as soon as one branch completes.</li>
+        <li><code>quorum:N</code> — proceed once <code>N</code> branches complete. Validation requires
+          <code>0 &lt; N &lt;= len(wait_for)</code>.</li>
+      </ul>
+      <p>The join is re-evaluated whenever a branch settles, including async branches.</p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- CHOICE -->
+    <section id="node-choice">
+      <span class="eyebrow">Flow definitions · node types</span>
+      <h2><span class="dot dot--choice"></span> choice</h2>
+      <p>
+        A <code>choice</code> node routes to the first matching rule. Rules are
+        <a href="https://github.com/expr-lang/expr" target="_blank" rel="noopener">expr-lang</a>
+        expressions evaluated against the shared payload, compiled at startup (not per execution).
+      </p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>rules</td><td>Ordered list of <code>{when, to}</code> rules plus exactly one <code>{default: true, to}</code>. At least one rule and a default are required.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Each rule's <code>to</code> must reference a known node. A non-default rule needs a
+        <code>when</code> expression; the first rule whose <code>when</code> is true wins, and the
+        <code>default</code> rule is the fallback when none match. The expression environment exposes the
+        execution payload as <code>payload</code> — reach into it with dotted paths
+        (<code>payload.user.tier</code>, <code>payload.items[0].sku</code>) and the full expr-lang
+        operator set (<code>==</code>, <code>&amp;&amp;</code>, <code>||</code>, <code>in</code>, …).
+      </p>
+      <p>
+        A <code>when</code> that errors at evaluation time — most commonly because it references a
+        field the payload doesn't have — is treated as <strong>no match</strong> (logged at warn
+        level), and evaluation continues to the next rule, ultimately reaching <code>default</code>.
+        An expression that returns a non-boolean is likewise an error and counts as no match. Order
+        rules from most to least specific, since the first match wins.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">choice node</span>
+          <button class="copy" data-copy="#choice-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="choice-src"><code>- <span class="k">id</span>: route
+  <span class="k">type</span>: <span class="t">choice</span>
+  <span class="k">rules</span>:
+    - {<span class="k">when</span>: <span class="s">'payload.risk_score &gt; 80'</span>,       <span class="k">to</span>: escalation}
+    - {<span class="k">when</span>: <span class="s">'payload.region in ["EU","UK"]'</span>, <span class="k">to</span>: gdpr_review}
+    - {<span class="k">default</span>: <span class="kw">true</span>,                        <span class="k">to</span>: synthesis}</code></pre>
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- SIGNAL -->
+    <section id="node-signal">
+      <span class="eyebrow">Flow definitions · node types</span>
+      <h2><span class="dot dot--signal"></span> signal</h2>
+      <p>
+        A <code>signal</code> node pauses the execution until a named external signal arrives. It is the
+        primitive for human approvals and waiting on external events.
+      </p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>signal_name</td><td>The name the external caller delivers via <code>Server.Signal</code>. Required.</td></tr>
+          <tr><td>timeout</td><td>How long to wait before taking the timeout route, e.g. <code>24h</code>.</td></tr>
+          <tr><td>on_timeout</td><td>Node id to route to when the deadline passes. Must reference a known node.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        Signal consumption is durable and idempotent — signals dedupe by JetStream sequence, so an
+        at-least-once publisher is safe. The timeout is scheduled through the Message Scheduler and
+        survives restarts. Deliver a signal with:
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">delivering a signal</span>
+          <button class="copy" data-copy="#sig-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="sig-src"><code>srv.<span class="fn">Signal</span>(ctx, execID, <span class="s">"approval"</span>, []<span class="kw">byte</span>(<span class="s">`{"by":"alice"}`</span>))</code></pre>
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- EDGES -->
+    <section id="edges">
+      <span class="eyebrow">Flow definitions</span>
+      <h2>Edges &amp; the start node</h2>
+      <p>
+        Edges define static transitions between nodes as <code>{from, to}</code> pairs. Validation
+        enforces a few rules that make the graph unambiguous:
+      </p>
+      <ul>
+        <li>Both endpoints of an edge must reference existing nodes.</li>
+        <li>A node may have <strong>at most one outgoing edge</strong> — branching is expressed by
+          <code>choice</code> / <code>fanout</code>, not by multiple edges.</li>
+        <li>A node with no outgoing edge is <strong>terminal</strong>; reaching it completes that path.</li>
+        <li>Branch targets (fan-out branches, choice <code>to</code>, signal <code>on_timeout</code>,
+          fan-in <code>wait_for</code>) count as having an inbound transition.</li>
+        <li>There must be <strong>exactly one start node</strong> — the single node with no inbound
+          transition. Zero or multiple start nodes is a validation error.</li>
+      </ul>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- INVOKER -->
+    <section id="invoker">
+      <span class="eyebrow">Execution</span>
+      <h2>The Invoker</h2>
+      <p>
+        An Invoker executes a single node invocation. Implement one method and your services inherit all
+        of packtrail's durability machinery. The contract is re-exported from the root <code>packtrail</code>
+        package so embedding apps depend only on it.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">the Invoker contract</span>
+          <button class="copy" data-copy="#inv-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="inv-src"><code><span class="kw">type</span> Invoker <span class="kw">interface</span> {
+    <span class="fn">Invoke</span>(ctx context.Context, req packtrail.Request) (packtrail.Result, <span class="kw">error</span>)
+}
+
+<span class="cm">// InvokerFunc adapts a plain function to the Invoker interface.</span>
+agent := packtrail.<span class="fn">InvokerFunc</span>(<span class="kw">func</span>(ctx context.Context, req packtrail.Request) (packtrail.Result, <span class="kw">error</span>) {
+    out, err := callAgent(ctx, req.Target, req.Payload)
+    <span class="kw">if</span> err != <span class="kw">nil</span> {
+        <span class="kw">return</span> packtrail.Result{}, err <span class="cm">// transient → retried per node policy</span>
+    }
+    <span class="kw">return</span> packtrail.Result{Status: packtrail.<span class="ok">StatusOK</span>, Payload: out}, <span class="kw">nil</span>
+})
+
+packtrail.<span class="fn">WithInvoker</span>(<span class="s">"agent"</span>, agent) <span class="cm">// register under a kind</span></code></pre>
+      </div>
+
+      <h3>Request</h3>
+      <p>The engine hands the Invoker everything it needs, transport-agnostic:</p>
+      <table class="doctable">
+        <thead><tr><th>Field</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>Invoker</td><td>The invoker kind selected for this node.</td></tr>
+          <tr><td>Target</td><td>Invoker-specific target, with <code>{execution_id}</code> already resolved.</td></tr>
+          <tr><td>ExecutionID</td><td>The owning execution id.</td></tr>
+          <tr><td>NodeID</td><td>The node being executed.</td></tr>
+          <tr><td>Payload</td><td>Shared execution context as raw JSON.</td></tr>
+          <tr><td>Attempt</td><td>0-based attempt counter for retries.</td></tr>
+          <tr><td>Deadline</td><td>Hard deadline for this attempt.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Result &amp; statuses</h3>
+      <p>
+        A <code>Result</code> carries a <code>Status</code>, an optional <code>Payload</code> (the new
+        shared context) and an optional <code>Error</code> string. A non-nil error from <code>Invoke</code>
+        is treated as a transient transport failure (equivalent to <code>StatusRetry</code>) and is never
+        cached.
+      </p>
+      <table class="doctable">
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>StatusOK</td><td>Node succeeded; <code>Payload</code> becomes the new shared context and the flow advances.</td></tr>
+          <tr><td>StatusError</td><td>Node failed permanently; the engine does not retry.</td></tr>
+          <tr><td>StatusRetry</td><td>Retry per the node's retry policy.</td></tr>
+          <tr><td>StatusPending</td><td>Dispatched asynchronously; the engine parks the execution and frees its slot. See <a href="#async">async activities</a>.</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Idempotent invocations</h3>
+      <p>
+        Enable <a href="#options"><code>WithResultCache()</code></a> to memoise results by
+        <code>(execution, node, attempt)</code> in a KV bucket. A work item redelivered after a crash
+        returns the cached result instead of re-invoking; a genuine retry (a new attempt) still calls the
+        Invoker. Turn it on whenever an invocation has side effects that must not run twice.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- NATS-TASK -->
+    <section id="nats-task">
+      <span class="eyebrow">Execution</span>
+      <h2>Built-in nats-task</h2>
+      <p>
+        The <code>nats-task</code> invoker is always registered — a task node that sets a
+        <code>subject</code> (and no <code>invoker</code>) uses it. It does a NATS request/reply on that
+        subject using the <code>pkg/protocol</code> request/reply wire format.
+        You can host a worker in the same process with <code>Server.Handle</code>:
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">in-process nats-task worker</span>
+          <button class="copy" data-copy="#nt-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="nt-src"><code><span class="cm">// subject may contain wildcards; workers join queue group "packtrail-workers".</span>
+srv.<span class="fn">Handle</span>(<span class="s">"tasks.notify.*"</span>, <span class="kw">func</span>(ctx context.Context, req packtrail.TaskRequest) (packtrail.TaskResponse, <span class="kw">error</span>) {
+    <span class="fn">notify</span>(req.Payload)
+    <span class="kw">return</span> packtrail.TaskResponse{Status: packtrail.<span class="ok">TaskOK</span>}, <span class="kw">nil</span>
+})</code></pre>
+      </div>
+      <p>
+        A <code>TaskRequest</code> carries <code>ExecutionID</code>, <code>NodeID</code>,
+        <code>Payload</code>, <code>Attempt</code> and <code>Deadline</code>. The handler returns a
+        <code>TaskResponse</code> with a status of <code>TaskOK</code>, <code>TaskError</code> or
+        <code>TaskRetry</code>; returning a non-nil error is reported to the engine as a retry.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- ASYNC -->
+    <section id="async">
+      <span class="eyebrow">Execution</span>
+      <h2>Async activities</h2>
+      <p>
+        Long-running work (an agent call, a human task, an external job) should not hold a work slot. An
+        Invoker that returns <code>StatusPending</code> parks the execution in the <code>waiting</code>
+        state and frees the slot immediately — a single instance can have thousands of inflight async
+        activities. The external worker settles it later with <code>CompleteActivity</code>.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">dispatch then settle</span>
+          <button class="copy" data-copy="#async-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="async-src"><code><span class="cm">// 1) dispatch: enqueue durable work, park the execution.</span>
+dispatch := packtrail.<span class="fn">InvokerFunc</span>(<span class="kw">func</span>(ctx context.Context, req packtrail.Request) (packtrail.Result, <span class="kw">error</span>) {
+    <span class="fn">enqueueJob</span>(req.ExecutionID, req.NodeID, req.Attempt, req.Payload)
+    <span class="kw">return</span> packtrail.Result{Status: packtrail.<span class="pend">StatusPending</span>}, <span class="kw">nil</span>
+})
+
+<span class="cm">// 2) later, from the worker that finished the job:</span>
+srv.<span class="fn">CompleteActivity</span>(ctx, execID, nodeID, attempt,
+    packtrail.Result{Status: packtrail.<span class="ok">StatusOK</span>, Payload: out})</code></pre>
+      </div>
+      <div class="callout">
+        <strong>Idempotent and stale-safe.</strong> <code>CompleteActivity</code> is keyed by
+        <code>(execution, node, attempt)</code>. A duplicate completion, or one for the wrong attempt, is
+        a silent no-op — so an at-least-once worker can call it freely. Use <code>Request.NodeID</code>
+        and <code>Request.Attempt</code> to identify the dispatched work. This works for plain task nodes
+        and fan-out branches alike.
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- SIGNALS -->
+    <section id="signals">
+      <span class="eyebrow">Execution</span>
+      <h2>Signals &amp; resuming</h2>
+      <p>
+        A <a href="#node-signal"><code>signal</code></a> node waits for an external event. Deliver one
+        with <code>Server.Signal(ctx, execID, name, payload)</code>; delivery is idempotent. Received
+        signal payloads are visible on the execution snapshot under <code>Signals</code>, and the name a
+        node is currently waiting on appears as <code>WaitSignal</code>.
+      </p>
+      <h3>Resuming a failed execution</h3>
+      <p>
+        <code>Server.Resume(ctx, execID)</code> revives a <code>failed</code> execution, re-running the
+        node it failed on with a fresh retry budget. The durable payload is preserved, and only failed
+        executions can be resumed. It is durable — any running engine in the namespace picks up the
+        resumed work.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- SCHEDULING -->
+    <section id="scheduling">
+      <span class="eyebrow">Execution</span>
+      <h2>Scheduling &amp; cron</h2>
+      <p>
+        Recurring flow starts, retry backoff and signal timeouts all run through the JetStream Message
+        Scheduler — the engine never keeps an in-process timer, so every schedule survives restarts.
+        Install a recurring start with a 6-field cron expression (<code>sec min hour dom mon dow</code>):
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">schedule a recurring flow</span>
+          <button class="copy" data-copy="#cron-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="cron-src"><code><span class="cm">// run "research-pipeline" every day at 02:00; reusing the name replaces it.</span>
+srv.<span class="fn">ScheduleFlow</span>(ctx, <span class="s">"nightly"</span>, <span class="s">"research-pipeline"</span>, <span class="s">"0 0 2 * * *"</span>, <span class="kw">nil</span>)</code></pre>
+      </div>
+      <p>
+        Periodic reconciliation of the visibility indexes uses the same cron format via
+        <a href="#options"><code>WithReconcile</code></a>.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- STATUSES -->
+    <section id="statuses">
+      <span class="eyebrow">Execution</span>
+      <h2>Statuses &amp; lifecycle</h2>
+      <p>An execution moves between four durable statuses:</p>
+      <table class="doctable">
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>running</td><td>The engine is actively progressing the execution (<code>ExecRunning</code>).</td></tr>
+          <tr><td>waiting</td><td>Parked on a signal or an async activity; no work slot held (<code>ExecWaiting</code>).</td></tr>
+          <tr><td>completed</td><td>A terminal node was reached successfully (<code>ExecCompleted</code>).</td></tr>
+          <tr><td>failed</td><td>A node failed permanently; can be revived with <code>Resume</code> (<code>ExecFailed</code>).</td></tr>
+        </tbody>
+      </table>
+      <p>
+        A read-only <code>Execution</code> snapshot (from <code>Get</code>) exposes <code>ID</code>,
+        <code>Flow</code>, <code>Status</code>, <code>CurrentNode</code>, <code>Payload</code>,
+        <code>Attempt</code>, per-branch state (<code>Branches</code>), received <code>Signals</code>,
+        the active <code>WaitSignal</code>, any <code>Error</code> and <code>UpdatedAt</code>. The
+        execution KV is the source of truth — read it (not the indexes) for correctness decisions.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- SERVER API -->
+    <section id="server-api">
+      <span class="eyebrow">Reference</span>
+      <h2>Server API</h2>
+      <p>The methods on <code>*packtrail.Server</code>:</p>
+      <table class="doctable">
+        <thead><tr><th>Method</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>New(nc, …opts)</td><td>Build a server: bootstrap buckets/streams, register invokers, load flows. Does not start processing.</td></tr>
+          <tr><td>Run(ctx)</td><td>Start the engine, indexer and (if configured) reconcile schedule; blocks until ctx is cancelled. Drains workers on return.</td></tr>
+          <tr><td>Start(ctx, flow, payload)</td><td>Create a new execution and return its id.</td></tr>
+          <tr><td>ScheduleFlow(ctx, name, flow, cron, payload)</td><td>Install/replace a recurring schedule that starts a flow.</td></tr>
+          <tr><td>Signal(ctx, execID, name, payload)</td><td>Deliver an external signal to an execution.</td></tr>
+          <tr><td>CompleteActivity(ctx, execID, node, attempt, res)</td><td>Settle an async activity previously reported as <code>StatusPending</code>. Idempotent.</td></tr>
+          <tr><td>Resume(ctx, execID)</td><td>Revive a failed execution with a fresh retry budget.</td></tr>
+          <tr><td>Get(ctx, execID)</td><td>Return an <code>Execution</code> snapshot, or <code>ErrNotFound</code>.</td></tr>
+          <tr><td>ByStatus(ctx, status)</td><td>Execution ids indexed under a status (eventually consistent).</td></tr>
+          <tr><td>ByFlow(ctx, flow)</td><td>Execution ids belonging to a flow.</td></tr>
+          <tr><td>List(ctx)</td><td>Every execution id in the store (authoritative).</td></tr>
+          <tr><td>Reconcile(ctx)</td><td>Rebuild the visibility indexes from the source of truth.</td></tr>
+          <tr><td>Flows()</td><td>Names of the flows this server knows.</td></tr>
+          <tr><td>Handle(subject, h)</td><td>Register an in-process built-in nats-task worker.</td></tr>
+          <tr><td>Close()</td><td>Drain registered workers. Does not close the NATS connection.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- OPTIONS -->
+    <section id="options">
+      <span class="eyebrow">Reference</span>
+      <h2>Configuration options</h2>
+      <p>Options passed to <code>packtrail.New</code>:</p>
+      <div class="optlist">
+        <div class="optlist__row"><code>WithNamespace(prefix)</code><span>Prefix every bucket, stream, subject and durable (default "packtrail") — isolate deployments on a shared cluster.</span></div>
+        <div class="optlist__row"><code>WithFlowsDir(dir)</code><span>Load every *.yaml / *.yml flow definition in a directory at startup.</span></div>
+        <div class="optlist__row"><code>WithFlow(yamlDoc)</code><span>Register a single flow from an inline YAML document; repeatable.</span></div>
+        <div class="optlist__row"><code>WithInvoker(kind, inv)</code><span>Register a custom Invoker under a kind; the built-in nats-task is always present and may be overridden.</span></div>
+        <div class="optlist__row"><code>WithResultCache()</code><span>Wrap the registry in a KV-backed idempotency cache keyed by (execution, node, attempt).</span></div>
+        <div class="optlist__row"><code>WithReconcile(cron)</code><span>Install a recurring visibility reconciliation on a 6-field cron expression.</span></div>
+        <div class="optlist__row"><code>WithMaxConcurrency(n)</code><span>Cap concurrent work items per instance (default 64).</span></div>
+        <div class="optlist__row"><code>WithDefaultTimeout(d)</code><span>Invocation timeout for nodes that omit one (default 30s).</span></div>
+        <div class="optlist__row"><code>WithLeaseTTL(d)</code><span>Per-execution ownership lease TTL (default 30s); a crashed instance's work frees after roughly this.</span></div>
+        <div class="optlist__row"><code>WithOwnerID(id)</code><span>Stable ownership-lease owner id; defaults to a random id per instance.</span></div>
+      </div>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- RESOURCES -->
+    <section id="resources">
+      <span class="eyebrow">Reference</span>
+      <h2>NATS resources</h2>
+      <p>
+        Every resource is prefixed with the namespace (default <code>packtrail</code>), so independent
+        deployments can share a cluster. The buckets and streams a deployment creates:
+      </p>
+      <div class="arch__stores" style="margin:1.2rem 0">
+        <div class="store store--truth"><code>packtrail-executions</code><span>KV · source of truth</span></div>
+        <div class="store store--lease"><code>packtrail-leases</code><span>KV · ownership (TTL)</span></div>
+        <div class="store store--stream"><code>packtrail-work</code><span>stream · work queue</span></div>
+        <div class="store store--stream"><code>packtrail-events</code><span>stream · domain events</span></div>
+        <div class="store store--stream"><code>packtrail-signals</code><span>stream · external signals</span></div>
+        <div class="store store--timer"><code>packtrail-schedule</code><span>scheduler · timers &amp; cron</span></div>
+        <div class="store store--truth" style="border-left-color:var(--sky-hi)"><code>packtrail-flows</code><span>KV · flow registry</span></div>
+        <div class="store store--cache"><code>packtrail-result-cache</code><span>KV · idempotency (opt-in)</span></div>
+        <div class="store store--proj"><code>packtrail-idx-status</code><span>KV · projection</span></div>
+        <div class="store store--proj"><code>packtrail-idx-flow</code><span>KV · projection</span></div>
+      </div>
+      <p>
+        Each flow's graph is published to <code>packtrail-flows</code> at startup, so observability tools can
+        render flows without access to the source YAML or the engine process.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- OBSERVABILITY -->
+    <section id="observability">
+      <span class="eyebrow">Reference</span>
+      <h2>Observability · packtrail-ui</h2>
+      <p>
+        <code>packtrail-ui</code> is a read-only dashboard that connects to the same NATS cluster, reads
+        execution state and the flow registry, and tails the live event stream — no engine process or
+        source YAML required. It reads <code>NATS_URL</code> (default <code>nats://localhost:4222</code>).
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">start the dashboard</span>
+          <button class="copy" data-copy="#ui-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="ui-src"><code><span class="pr">$</span> go run ./cmd/packtrail-ui --namespace packtrail --addr :8088</code></pre>
+      </div>
+      <table class="doctable">
+        <thead><tr><th>Endpoint</th><th>Returns</th></tr></thead>
+        <tbody>
+          <tr><td>GET /api/flows</td><td>Names of all registered flows.</td></tr>
+          <tr><td>GET /api/flows/{name}</td><td>Full <code>FlowGraph</code> (nodes + edges).</td></tr>
+          <tr><td>GET /api/executions</td><td>Execution summaries; filter with <code>?status=</code> or <code>?flow=</code>.</td></tr>
+          <tr><td>GET /api/executions/{id}</td><td>Full <code>Execution</code> snapshot.</td></tr>
+          <tr><td>GET /api/events</td><td>Live Server-Sent Events stream of every transition.</td></tr>
+        </tbody>
+      </table>
+      <p>
+        The same data is available programmatically through the <a href="#server-api">Server API</a>
+        (<code>Flows</code>, <code>Get</code>, <code>ByStatus</code>, <code>ByFlow</code>) and, for events,
+        a live watch channel.
+      </p>
+    </section>
+
+    <hr class="docs__hr" />
+
+    <!-- TESTING -->
+    <section id="testing">
+      <span class="eyebrow">Reference</span>
+      <h2>Testing</h2>
+      <p>
+        Packtrail's own test suite runs against a real embedded <code>nats-server</code> — there are no
+        mocks. When testing flows that embed packtrail, the same approach works well: start an embedded
+        server, register an <code>InvokerFunc</code> stub for each kind, and drive executions.
+      </p>
+      <div class="codecard">
+        <div class="codecard__bar">
+          <span class="codecard__dots"><i></i><i></i><i></i></span>
+          <span class="codecard__name">go test</span>
+          <button class="copy" data-copy="#test-src">Copy</button>
+        </div>
+<pre class="codecard__body" id="test-src"><code><span class="pr">$</span> go build ./...
+<span class="pr">$</span> go test -race ./...   <span class="cm"># real embedded nats-server, no external NATS needed</span>
+<span class="pr">$</span> go vet ./...</code></pre>
+      </div>
+      <div class="callout">
+        Use <a href="#options"><code>WithFlow</code></a> to register flows inline from a YAML literal —
+        no files on disk — which keeps tests self-contained, and give each test a distinct
+        <code>WithNamespace</code> so they never collide on a shared server.
+      </div>
+    </section>
+
+  </article>
+</div>
+
+<!-- ============================ FOOTER ============================ -->
+<footer class="footer">
+  <div class="footer__inner">
+    <div class="footer__brand">
+      <span class="brand">
+        <svg class="brand__mark" viewBox="0 0 40 40" aria-hidden="true">
+          <path d="M8 34 Q20 20, 32 7" stroke="currentColor" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+          <circle cx="8" cy="34" r="5.5" fill="currentColor"/>
+          <circle cx="20" cy="20.5" r="3.8" fill="currentColor" opacity="0.7"/>
+          <circle cx="32" cy="7" r="5.5" fill="currentColor"/>
+        </svg>
+        Packtrail
+      </span>
+      <p>A durable, ecosystem-agnostic workflow engine built on nothing but NATS.</p>
+    </div>
+    <div class="footer__cols">
+      <div>
+        <h5>Project</h5>
+        <a href="https://github.com/henomis/packtrail" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/henomis/packtrail#readme" target="_blank" rel="noopener">README</a>
+      </div>
+      <div>
+        <h5>Built on</h5>
+        <a href="https://nats.io" target="_blank" rel="noopener">NATS · JetStream</a>
+        <a href="https://github.com/expr-lang/expr" target="_blank" rel="noopener">expr-lang</a>
+      </div>
+      <div>
+        <h5>Docs</h5>
+        <a href="#quickstart">Quick start</a>
+        <a href="#invoker">Invoker</a>
+        <a href="#server-api">Server API</a>
+        <a href="index.html">Home</a>
+      </div>
+    </div>
+  </div>
+  <div class="footer__base">
+    <span>packtrail · a durable workflow engine. Blazing a path through complexity.</span>
+    <span>Apache 2.0 open source · Go 1.26</span>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

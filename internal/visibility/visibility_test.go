@@ -1,0 +1,194 @@
+// Copyright 2026 Simone Vellei
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package visibility
+
+import (
+	"context"
+	"encoding/json"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/henomis/packtrail/internal/names"
+	"github.com/henomis/packtrail/internal/natstest"
+	"github.com/henomis/packtrail/internal/store"
+)
+
+// setup starts an embedded server, a store and a running indexer.
+func setup(t *testing.T) (context.Context, *store.Store, *Indexer) {
+	t.Helper()
+
+	ctx := context.Background()
+	srv := natstest.Start(t)
+
+	st, err := store.Open(ctx, srv.JS, names.New(""))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	ix := New(st)
+
+	cc, err := ix.Run(ctx)
+	if err != nil {
+		t.Fatalf("indexer run: %v", err)
+	}
+
+	t.Cleanup(cc.Stop)
+
+	return ctx, st, ix
+}
+
+// contains reports whether id is in ids.
+func contains(ids []string, id string) bool { return slices.Contains(ids, id) }
+
+const waitIndexTimeout = 3 * time.Second
+
+// waitIndex polls ByStatus until the membership predicate holds, or fails.
+func waitIndex(t *testing.T, ix *Indexer, status, id string, want bool) {
+	t.Helper()
+
+	ctx := context.Background()
+
+	deadline := time.Now().Add(waitIndexTimeout)
+	for time.Now().Before(deadline) {
+		ids, err := ix.ByStatus(ctx, status)
+		if err == nil && contains(ids, id) == want {
+			return
+		}
+
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	ids, _ := ix.ByStatus(ctx, status)
+	t.Fatalf("ByStatus(%q) membership of %s = %v, want %v (have %v)", status, id, !want, want, ids)
+}
+
+func mkExec(t *testing.T, st *store.Store, flow string) *store.Execution {
+	t.Helper()
+
+	id := "exec-" + flow + "-" + time.Now().Format("150405.000000")
+
+	ex := &store.Execution{ID: id, FlowName: flow, CurrentNode: "start", Status: store.StatusRunning, Payload: json.RawMessage("{}")}
+	if _, err := st.Create(context.Background(), ex); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	if err := st.EmitEvent(context.Background(), ex); err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+
+	return ex
+}
+
+// TestIndexReflectsStateWithinSeconds is the §12 acceptance test: a status-index
+// query reflects real state within a few seconds with no manual reconciliation.
+func TestIndexReflectsStateWithinSeconds(t *testing.T) {
+	ctx, st, ix := setup(t)
+	ex := mkExec(t, st, "alpha")
+
+	// Initial running state is indexed promptly.
+	waitIndex(t, ix, store.StatusRunning, ex.ID, true)
+
+	// Transition to completed: the new status appears and the old one is gone.
+	updated, err := st.Mutate(ctx, ex.ID, func(e *store.Execution) error {
+		e.Status = store.StatusCompleted
+		e.CurrentNode = ""
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("mutate: %v", err)
+	}
+
+	_ = st.EmitEvent(ctx, updated)
+
+	waitIndex(t, ix, store.StatusCompleted, ex.ID, true)
+	waitIndex(t, ix, store.StatusRunning, ex.ID, false)
+}
+
+// TestByFlow verifies the flow index groups executions by flow name.
+func TestByFlow(t *testing.T) {
+	ctx, st, ix := setup(t)
+	a := mkExec(t, st, "beta")
+	b := mkExec(t, st, "beta")
+	c := mkExec(t, st, "gamma")
+
+	waitIndex(t, ix, store.StatusRunning, a.ID, true)
+	waitIndex(t, ix, store.StatusRunning, b.ID, true)
+	waitIndex(t, ix, store.StatusRunning, c.ID, true)
+
+	beta, err := ix.ByFlow(ctx, "beta")
+	if err != nil {
+		t.Fatalf("by flow: %v", err)
+	}
+
+	if !contains(beta, a.ID) || !contains(beta, b.ID) || contains(beta, c.ID) {
+		t.Fatalf("ByFlow(beta) = %v, want {%s,%s} only", beta, a.ID, b.ID)
+	}
+}
+
+// TestStaleEventIgnored verifies an out-of-order (lower-revision) event does not
+// resurrect a previous status.
+func TestStaleEventIgnored(t *testing.T) {
+	ctx, st, ix := setup(t)
+	ex := mkExec(t, st, "delta") // revision r1, running
+	r1 := ex.Revision
+
+	updated, err := st.Mutate(ctx, ex.ID, func(e *store.Execution) error {
+		e.Status = store.StatusCompleted
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("mutate: %v", err)
+	}
+
+	_ = st.EmitEvent(ctx, updated)
+
+	waitIndex(t, ix, store.StatusCompleted, ex.ID, true)
+
+	// Replay the original running event (revision r1 < current): must be ignored.
+	stale := store.Event{ExecID: ex.ID, FlowName: ex.FlowName, Status: store.StatusRunning, Revision: r1, Time: time.Now()}
+	if indexErr := ix.index(ctx, stale); indexErr != nil {
+		t.Fatalf("index stale: %v", indexErr)
+	}
+
+	if ids, _ := ix.ByStatus(ctx, store.StatusRunning); contains(ids, ex.ID) {
+		t.Fatalf("stale event resurrected running status: %v", ids)
+	}
+}
+
+// TestReconcileRepairsDrift verifies Reconcile rebuilds the index from the
+// source of truth after manual corruption.
+func TestReconcileRepairsDrift(t *testing.T) {
+	ctx, st, ix := setup(t)
+	ex := mkExec(t, st, "epsilon")
+	waitIndex(t, ix, store.StatusRunning, ex.ID, true)
+
+	// Corrupt the index: delete the membership and meta entries.
+	_ = st.IdxStatus().Delete(ctx, store.StatusRunning+sep+ex.ID)
+
+	_ = st.IdxStatus().Delete(ctx, metaPrefix+ex.ID)
+	if ids, _ := ix.ByStatus(ctx, store.StatusRunning); contains(ids, ex.ID) {
+		t.Fatalf("expected corrupted index to drop %s", ex.ID)
+	}
+
+	if err := ix.Reconcile(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	if ids, _ := ix.ByStatus(ctx, store.StatusRunning); !contains(ids, ex.ID) {
+		t.Fatalf("reconcile did not restore %s: %v", ex.ID, ids)
+	}
+}
